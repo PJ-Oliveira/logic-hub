@@ -5,19 +5,19 @@ import { generate, type Lang } from '../fol-codegen';
 import { type Language } from '../i18n';
 
 const EXAMPLE = `// ── Rich Domain Model in Finite First-Order Logic ──────────────────
-// keywords: sort · sig · value · rule · invariant  (see Syntax Reference ↓)
+// keywords: sort · entity · value · rule · invariant  (see Syntax Reference ↓)
 
 sort Status   = pending | approved | rejected;
 sort Role     = admin | user | guest;
 sort Currency = USD | EUR | BRL;
 
-sig User {
+entity User {
   id: UUID;
   active: Boolean;
   roles: Set<Role>;
 }
 
-sig Order {
+entity Order {
   id: UUID;
   owner: User;
   status: Status;
@@ -50,21 +50,21 @@ const SYNTAX_GUIDE: SGSection[] = [
       {
         kw: 'sort',
         tagline: 'Finite closed enum — all variants known at compile time',
-        body: 'A named set of possible values. All variants are listed upfront; no others can exist. Use sort names as field types inside sig and value.',
+        body: 'A named set of possible values. All variants are listed upfront; no others can exist. Use sort names as field types inside entity and value.',
         syntax: 'sort Status = pending | approved | rejected;',
         gen: 'Java: sealed interface + record per variant\nTS:   type Status = \'pending\' | \'approved\' | \'rejected\'\nPy:   class Status(Enum): pending = auto() ...',
       },
       {
-        kw: 'sig',
-        tagline: 'FOL signature — entity WITH identity (Alloy-style)',
-        body: 'Objects are distinguished by their id field, NOT by content. Two sigs with identical data but different ids are different entities. Rules inside run at construction — violation rejects the object.',
-        syntax: 'sig Order {\n  id: UUID;\n  owner: User;\n  status: Status;\n\n  rule r: if status = approved then active(owner);\n}',
+        kw: 'entity',
+        tagline: 'Domain entity — identity by id field, NOT by content',
+        body: 'Two entities with identical data but different ids are different objects. Rules inside run at construction — violation rejects the object. Always has an id field (UUID or similar).',
+        syntax: 'entity Order {\n  id: UUID;\n  owner: User;\n  status: Status;\n\n  rule r: if status = approved then active(owner);\n}',
         gen: 'Java: public final class + private constructor + static create() + DomainException\nTS:   type T = Readonly<{...}> & { _brand } + createT(): Result<T, DomainError>\nPy:   @dataclass(eq=False, frozen=True) + __eq__/__hash__ by id field',
       },
       {
         kw: 'value',
         tagline: 'Value Object — NO identity, structural equality',
-        body: 'Two instances with the same fields are always equal, regardless of where they came from. No id field needed. Rules run at construction the same way as sig. Use for: Money, Coordinates, Email, Measurement — things defined purely by their content.',
+        body: 'Two instances with the same fields are always equal, regardless of where they came from. No id field needed. Rules run at construction the same way as entity. Use for: Money, Coordinates, Email, Measurement — things defined purely by their content.',
         syntax: 'value Money {\n  amount: Float;\n  currency: Currency;\n\n  rule r: amount > 0;\n}',
         gen: 'Java: public record + compact constructor + DomainException\nTS:   type T = Readonly<{...}> & { _brand } + createT(): Result<T, DomainError>\nPy:   @dataclass(frozen=True)  (default __eq__ compares all fields)',
       },
@@ -75,14 +75,14 @@ const SYNTAX_GUIDE: SGSection[] = [
     entries: [
       {
         kw: 'rule',
-        tagline: 'Invariant scoped to a sig/value — enforced at construction time',
+        tagline: 'Invariant scoped to an entity/value — enforced at construction time',
         body: 'Violation REJECTS the object — construction fails with DomainException / DomainError. The object simply cannot exist in an invalid state. Use for field ranges, cross-field rules, status-based access constraints.',
         syntax: 'rule no_negative:\n  amount > 0;\n\nrule approved_needs_active_owner:\n  if status = approved then active(owner);',
         gen: 'Java: if (violation) throw new DomainException("rule_name")\nTS:   if (violation) return err(\'rule_name\')\nPy:   if violation: raise DomainError("rule_name")',
       },
       {
         kw: 'invariant',
-        tagline: 'Global FOL axiom spanning multiple sig types',
+        tagline: 'Global FOL axiom spanning multiple entity types',
         body: 'Cannot be enforced at construction because it crosses aggregate boundaries. Generated as a documented comment. Implement manually in a domain service, policy object, or repository-level validator.',
         syntax: 'invariant admin_always_active:\n  forall u: User. hasRole(u, admin) => u.active = true;',
         gen: '→ // invariant <name>  comment in all generated files\n→ implement in: DomainService / @Policy / Repository.validate()',
@@ -113,8 +113,8 @@ const SYNTAX_GUIDE: SGSection[] = [
       { kw: 'field = value',           tagline: 'Equality — also checks sort variant membership  (status = approved)' },
       { kw: 'field != value',          tagline: 'Inequality' },
       { kw: 'amount > 0  /  age >= 18', tagline: 'Numeric comparison  (<  <=  >  >=)' },
-      { kw: 'active(owner)',           tagline: 'Boolean predicate — reads a boolean field on a referenced sig' },
-      { kw: 'hasRole(user, admin)',    tagline: '2-arg predicate — checks Set<Sort> membership on a referenced sig' },
+      { kw: 'active(owner)',           tagline: 'Boolean predicate — reads a boolean field on a referenced entity' },
+      { kw: 'hasRole(user, admin)',    tagline: '2-arg predicate — checks Set<Sort> membership on a referenced entity' },
       { kw: 'u.active = true',         tagline: 'Dot-chain — access a field on a quantified variable' },
     ],
   },
@@ -122,8 +122,8 @@ const SYNTAX_GUIDE: SGSection[] = [
     title: 'Field Types',
     entries: [
       { kw: 'String  Boolean  Int  Float  UUID', tagline: 'Primitive types' },
-      { kw: 'Set<SortName>  List<SortName>',     tagline: 'Collections — inner type is a sort or sig name' },
-      { kw: 'OtherSig',                          tagline: 'Reference to another sig (related by identity, not embedded)' },
+      { kw: 'Set<SortName>  List<SortName>',     tagline: 'Collections — inner type is a sort or entity name' },
+      { kw: 'OtherEntity',                       tagline: 'Reference to another entity (related by identity, not embedded)' },
     ],
   },
 ];
@@ -141,8 +141,8 @@ const RDM_MAP = [
     py: 'class S(Enum): v1 = auto()',
   },
   {
-    kw: 'sig',
-    fol: 'FOL signature with identity',
+    kw: 'entity',
+    fol: 'Domain entity with identity',
     rdm: 'Entity — identity by id field, private constructor, enforced invariants at creation',
     java: 'final class + private ctor + static create() + DomainException',
     ts: 'branded type + createX(): Result<T, DomainError>',
