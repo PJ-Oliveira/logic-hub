@@ -9,7 +9,8 @@ export const translations = {
       singularTerms: 'Singular Terms',
       fol: 'First-Order Logic',
       predicate: 'Predicate Calculus',
-      aristotelian: 'Aristotelian Square'
+      aristotelian: 'Aristotelian Square',
+      folEditor: 'FOL Spec Editor'
     },
     truthTable: {
       title: 'Truth Tables (Tabelas-Verdade)',
@@ -167,7 +168,8 @@ export const translations = {
       btnFalse: 'False (F)',
       inferCorrect: 'Correct!',
       inferIncorrect: 'Incorrect. Think about the definition of {relation}.'
-    }
+    },
+    folEditor: {}
   },
   pt: {
     appTitle: 'Central da Lógica',
@@ -177,7 +179,8 @@ export const translations = {
       singularTerms: 'Termos Singulares',
       fol: 'Lógica de 1ª Ordem',
       predicate: 'Cálculo de Predicados',
-      aristotelian: 'Quadrado Aristotélico'
+      aristotelian: 'Quadrado Aristotélico',
+      folEditor: 'Editor FOL'
     },
     truthTable: {
       title: 'Tabelas-Verdade Interativas',
@@ -335,6 +338,7 @@ export const translations = {
       btnFalse: 'Falso (F)',
       inferCorrect: 'Correto!',
       inferIncorrect: 'Incorreto. Pense bem na definição lógica de {relation}.'
-    }
+    },
+    folEditor: {}
   }
 };

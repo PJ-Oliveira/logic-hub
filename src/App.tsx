@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table, Braces } from 'lucide-react';
 import { translations, Language } from './i18n';
 import { PropositionalTableau } from './tabs/PropositionalTableau';
 import { FirstOrderLogic } from './tabs/FirstOrderLogic';
@@ -7,14 +7,19 @@ import { AristotelianSquare } from './tabs/AristotelianSquare';
 import { SingularTerms } from './tabs/SingularTerms';
 import { TruthTable } from './tabs/TruthTable';
 import { PredicateCalculus } from './tabs/PredicateCalculus';
+import { FOLEditor } from './tabs/FOLEditor';
 
-type Tab = 'truthTable' | 'propTableau' | 'singularTerms' | 'fol' | 'predicate' | 'aristotelian';
+type Tab = 'truthTable' | 'propTableau' | 'singularTerms' | 'fol' | 'predicate' | 'aristotelian' | 'folEditor';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [activeTab, setActiveTab] = useState<Tab>('truthTable');
 
   const t = translations[lang];
+
+  useEffect(() => {
+    document.title = `${t.appTitle} | ${t.tabs[activeTab]}`;
+  }, [activeTab, lang, t]);
 
   return (
     <div className="min-h-screen bg-sand-50 text-sand-900 font-sans flex flex-col md:flex-row">
@@ -64,12 +69,20 @@ export default function App() {
             {t.tabs.predicate}
           </button>
 
-          <button 
+          <button
             onClick={() => setActiveTab('aristotelian')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-semibold transition-colors ${activeTab === 'aristotelian' ? 'bg-sand-100 text-sand-900 border border-sand-300 shadow-inner' : 'text-sand-700 hover:bg-sand-50 hover:text-sand-900 border border-transparent'}`}
           >
             <Square size={18} className={activeTab === 'aristotelian' ? 'text-sand-700' : 'text-sand-400'} />
             {t.tabs.aristotelian}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('folEditor')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-semibold transition-colors ${activeTab === 'folEditor' ? 'bg-sand-100 text-sand-900 border border-sand-300 shadow-inner' : 'text-sand-700 hover:bg-sand-50 hover:text-sand-900 border border-transparent'}`}
+          >
+            <Braces size={18} className={activeTab === 'folEditor' ? 'text-sand-700' : 'text-sand-400'} />
+            {t.tabs.folEditor}
           </button>
         </nav>
 
@@ -101,6 +114,7 @@ export default function App() {
           {activeTab === 'fol' && <FirstOrderLogic lang={lang} />}
           {activeTab === 'predicate' && <PredicateCalculus lang={lang} />}
           {activeTab === 'aristotelian' && <AristotelianSquare lang={lang} />}
+          {activeTab === 'folEditor' && <FOLEditor lang={lang} />}
         </div>
       </main>
     </div>
