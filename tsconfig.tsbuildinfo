@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/i18n.ts","./src/main.tsx","./src/setuptests.ts","./src/tableau.ts","./src/vite-env.d.ts","./src/tabs/aristoteliansquare.tsx","./src/tabs/firstorderlogic.tsx","./src/tabs/predicatecalculus.tsx","./src/tabs/propositionaltableau.tsx","./src/tabs/singularterms.tsx","./src/tabs/truthtable.tsx"],"version":"5.7.3"}
