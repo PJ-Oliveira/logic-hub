@@ -638,6 +638,70 @@ export function runFixtures(fixtures: Fixture[], program: Program): FixtureResul
   });
 }
 
+// ─── Step Debugger ────────────────────────────────────────────────────────────
+
+export type TraceStep = {
+  exprStr: string;
+  depth: number;
+  result: boolean;
+  skipped: boolean;
+};
+
+export function evalTrace(
+  e: Expr,
+  bindings: Bindings,
+  program: Program,
+): { steps: TraceStep[]; finalResult: boolean } {
+  const steps: TraceStep[] = [];
+
+  function go(node: Expr, depth: number, skip: boolean): boolean {
+    if (skip) {
+      steps.push({ exprStr: exprToString(node), depth, result: false, skipped: true });
+      return false;
+    }
+    let result: boolean;
+    switch (node.kind) {
+      case 'and': {
+        const l = go(node.left, depth + 1, false);
+        const r = go(node.right, depth + 1, !l);
+        result = l && r;
+        break;
+      }
+      case 'or': {
+        const l = go(node.left, depth + 1, false);
+        const r = go(node.right, depth + 1, l);
+        result = l || r;
+        break;
+      }
+      case 'implies': {
+        const l = go(node.left, depth + 1, false);
+        const r = go(node.right, depth + 1, !l);
+        result = !l || r;
+        break;
+      }
+      case 'not': {
+        const inner = go(node.expr, depth + 1, false);
+        result = !inner;
+        break;
+      }
+      case 'ite': {
+        const cond = go(node.cond, depth + 1, false);
+        go(node.then, depth + 1, !cond);
+        if (node.else_) go(node.else_, depth + 1, cond);
+        result = evalExpr(node, bindings, program);
+        break;
+      }
+      default:
+        result = evalExpr(node, bindings, program);
+    }
+    steps.push({ exprStr: exprToString(node), depth, result, skipped: false });
+    return result;
+  }
+
+  const finalResult = go(e, 0, false);
+  return { steps, finalResult };
+}
+
 // ─── Auto Debug (generates all scenarios from rules) ─────────────────────────
 
 export type AutoCase = {

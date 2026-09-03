@@ -184,33 +184,9 @@ invariant admin_always_active:
 | `Set<NomeDoSort>` `List<NomeDoSort>` | Coleções |
 | `OutraEntity` | Referência a outra entity (por identidade, não embutida) |
 
-#### Debug Automático — Cobertura de Regras (sem fixtures)
+#### Fixtures (casos de teste nomeados)
 
-Enquanto você escreve o FOL, o editor gera automaticamente **todos os cenários de teste relevantes** para cada `entity` e `value` que possui regras. Sem nenhum `fixture` necessário.
-
-Para cada regra exibe:
-- Quantos cenários a **satisfazem** (hold) e quantos a **violam** (violations)
-- Se a regra é **coverable** (violações encontradas) ou **! never fires** (regra morta / vacuamente verdadeira)
-- Exemplos concretos de violação com os bindings exatos
-
-O gerador funciona:
-1. Percorrendo a AST das regras para extrair candidatos para cada campo referenciado (variantes de sort para `=`, valores de fronteira para `>` / `<`, booleanos para predicados, conjuntos para `hasRole`)
-2. Gerando o produto cartesiano de todos os candidatos (limite de 200 por entidade)
-3. Avaliando cada combinação contra todas as regras e contabilizando cobertura
-
-Exemplo de saída para `Order` com duas regras:
-```
-Order entity · 54 cenários avaliados
-  approved_requires_active_owner  20 hold  4 violations  ✓ coverable
-  no_rejected_for_admins          22 hold  2 violations  ✓ coverable
-
-[violation] approved_requires_active_owner ← status=approved, owner.active=false, id=id-1
-[valid] status=pending, owner.active=true, owner.roles={admin}, id=id-1
-```
-
-#### Fixtures Manuais (opcional — para casos nomeados)
-
-Você pode escrever blocos `fixture` para asserções nomeadas com resultado PASS/FAIL:
+Escreva blocos `fixture` para definir cenários nomeados com resultados esperados:
 
 ```fol
 fixture pedido_valido {
@@ -226,12 +202,32 @@ fixture admin_nao_pode_rejected {
 }
 ```
 
-#### Geração de Testes
+#### Step Debugger
 
-Alterne o painel de saída para **Tests** para gerar código de testes a partir dos fixtures:
-- **Java 17+** — JUnit 5 `@Test` / `assertThrows(DomainException.class, ...)`
-- **TypeScript** — Vitest `test()` / `expect(result.ok).toBe(false)`
-- **Python** — pytest `def test_...` / `with pytest.raises(DomainError)`
+Cada fixture alimenta um **Step Debugger** ao vivo — como o debugger do IntelliJ/VSCode, mas para as suas regras FOL. Aparece automaticamente quando há fixtures definidas, sem nenhuma configuração.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Step Debugger  pedido_valido ▾  expect_ok pedido ▾  rule ▾│
+│ ⏮  ◀  Step 2/3  ▶  ⏭  ▶▶                               │
+├─────────────────────────────────────────────────────────┤
+│ Bindings                                                │
+│   status = pending   owner.active = true   id = u-1    │
+├─────────────────────────────────────────────────────────┤
+│ ✓  status = approved                false              │
+│ ⚡  active(owner)                   [atual]            │
+│ ·  (if status = approved then ...)  futuro             │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Selecione qualquer **fixture**, **expect** e **regra** para traçar
+- Avance manualmente com ◀ ▶, pule ao final com ⏭, ou use auto-play a 650 ms/passo com ▶▶
+- Cada sub-expressão aparece **indentada pela profundidade** na árvore de avaliação
+- Step atual: destaque âmbar ⚡
+- Steps passados: ✓ verde (verdadeiro) / ✗ vermelho (falso)
+- Steps curto-circuitados: ⟳ cinza + riscado (não avaliados por short-circuit de `∧`/`∨`/`→`)
+- Steps futuros: opacos
+- Veredicto final no último step: **rule holds — object is VALID** (verde) ou **rule violated — construction REJECTED** (vermelho)
 
 #### Funcionalidades adicionais do editor
 

@@ -128,34 +128,9 @@ invariant admin_always_active:
   forall u: User. hasRole(u, admin) => u.active = true;
 ```
 
-#### Automatic Debug — Rule Coverage (no fixtures needed)
+#### Fixtures (named test cases)
 
-As you type your FOL specification, the editor automatically generates **all meaningful test scenarios** for every entity and value that has rules. No `fixture` blocks required.
-
-For each rule, it shows:
-- How many scenarios satisfy the rule (**hold**)
-- How many violate it (**violations found**)
-- Whether the rule is **coverable** (violations were found) or **never fires** (the rule may be vacuously true or dead)
-- Concrete binding examples: which exact field values cause a violation
-
-The scenario generator works by:
-1. Walking the rule's AST to extract candidate values for every field referenced (sort variants for enum comparisons, boundary numerics for `>` / `<`, booleans for predicates, set membership for `hasRole`)
-2. Generating the Cartesian product of all candidates (capped at 200 per entity to keep evaluation instant)
-3. Evaluating every combination against every rule and counting results
-
-Example output for `Order` with two rules:
-```
-Order entity · 54 scenarios evaluated
-  approved_requires_active_owner  20 hold  4 violations  ✓ coverable
-  no_rejected_for_admins          22 hold  2 violations  ✓ coverable
-
-[violation] approved_requires_active_owner ← status=approved, owner.active=false, id=id-1
-[valid] status=pending, owner.active=true, owner.roles={admin}, id=id-1
-```
-
-#### Manual Fixtures (optional — for named test cases)
-
-You can also write named `fixture` blocks to assert specific scenarios and get PASS/FAIL results:
+Write `fixture` blocks to define named scenarios with expected outcomes:
 
 ```fol
 fixture valid_order {
@@ -164,27 +139,46 @@ fixture valid_order {
   expect_ok order;
 }
 
-fixture rejected_for_admin_violates_rule {
+fixture admin_cannot_be_rejected {
   let admin = User { id: "u-2", active: true, roles: { admin } };
   let order = Order { id: "o-2", owner: admin, status: rejected };
   expect_violation no_rejected_for_admins in order;
 }
 ```
 
-Each `expect_ok` / `expect_violation` assertion shows **PASS** or **FAIL** with the specific rule that fired.
+#### Step Debugger
 
-#### Test Code Generation
+Every fixture powers a live **Step Debugger** — like the IntelliJ/VSCode debugger, but for your FOL rules. No setup required; it appears automatically when fixtures are defined.
 
-Switch the output panel to **Tests** to generate ready-to-paste test code from your fixtures:
-- **Java 17+** — JUnit 5 `@Test` / `assertThrows(DomainException.class, ...)`
-- **TypeScript** — Vitest `test()` / `expect(result.ok).toBe(false)`
-- **Python** — pytest `def test_...` / `with pytest.raises(DomainError)`
+```
+┌─────────────────────────────────────────────────────────┐
+│ Step Debugger  valid_order ▾  expect_ok order ▾  rule ▾ │
+│ ⏮  ◀  Step 2/3  ▶  ⏭  ▶▶                               │
+├─────────────────────────────────────────────────────────┤
+│ Bindings                                                │
+│   status = pending   owner.active = true   id = u-1    │
+├─────────────────────────────────────────────────────────┤
+│ ✓  status = approved                false              │
+│ ⚡  active(owner)                   [current]          │
+│ ·  (if status = approved then ...)  future             │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Select any **fixture**, **expect**, and **rule** to trace
+- Step manually with ◀ ▶, jump to end with ⏭, or auto-play at 650 ms/step with ▶▶
+- Each sub-expression is shown **indented by nesting depth**
+- Current step: amber highlight ⚡
+- Past steps: ✓ green (true) / ✗ red (false)
+- Short-circuited steps: ⟳ gray + strikethrough (skipped due to AND/OR/→ short-circuit)
+- Future steps: dimmed
+- Final verdict at the last step: **rule holds** (green) or **rule violated** (red)
 
 #### Additional features
 - **Live parse feedback** — errors are shown with line numbers as you type.
 - **Parsed model panel** — shows sorts, entities, fields, and rules in a readable summary.
 - **Syntax Reference** — collapsible, with rich cards explaining every keyword: tagline, explanation, syntax example, and generated code for all three languages.
 - **FOL → RDM mapping table** — shows how each FOL keyword maps to its Rich Domain Model role in Java, TypeScript, and Python.
+- **Language tabs** — switch between Java, TypeScript, and Python with one click.
 - **Copy & Download** — copy the generated code to clipboard or download as `.java` / `.ts` / `.py`.
 - **Collapsible sidebar** — click the `‹` arrow in the sidebar header to hide the navigation and gain full-width workspace. A `›` pill appears at the left edge to restore it. On mobile, a **Menu** button appears at the top of the content area.
 
@@ -350,19 +344,9 @@ invariant admin_always_active:
   forall u: User. hasRole(u, admin) => u.active = true;
 ```
 
-#### Debug Automático — Cobertura de Regras (sem fixtures)
+#### Fixtures (casos de teste nomeados)
 
-Enquanto você escreve a especificação FOL, o editor gera automaticamente **todos os cenários de teste relevantes** para cada `entity` e `value` que possui regras. Sem blocos `fixture` necessários.
-
-Para cada regra, exibe:
-- Quantos cenários **satisfazem** a regra (hold)
-- Quantos a **violam** (violations found)
-- Se a regra é **coverable** (violações foram encontradas) ou **never fires** (a regra pode ser vacuamente verdadeira ou morta)
-- Exemplos concretos: quais valores de campo causam a violação
-
-#### Fixtures Manuais (opcional — para casos nomeados)
-
-Você também pode escrever blocos `fixture` para asserções específicas com resultado PASS/FAIL:
+Escreva blocos `fixture` para definir cenários nomeados com resultados esperados:
 
 ```fol
 fixture pedido_valido {
@@ -370,20 +354,47 @@ fixture pedido_valido {
   let pedido = Order { id: "o-1", owner: comprador, status: pending };
   expect_ok pedido;
 }
+
+fixture admin_nao_pode_rejected {
+  let admin = User { id: "u-2", active: true, roles: { admin } };
+  let pedido = Order { id: "o-2", owner: admin, status: rejected };
+  expect_violation no_rejected_for_admins in pedido;
+}
 ```
 
-#### Geração de Testes
+#### Step Debugger
 
-Alterne o painel de saída para **Tests** para gerar código de teste a partir dos seus fixtures:
-- **Java 17+** — JUnit 5 `@Test` / `assertThrows(DomainException.class, ...)`
-- **TypeScript** — Vitest `test()` / `expect(result.ok).toBe(false)`
-- **Python** — pytest `def test_...` / `with pytest.raises(DomainError)`
+Cada fixture alimenta um **Step Debugger** ao vivo — como o debugger do IntelliJ/VSCode, mas para suas regras FOL. Aparece automaticamente quando fixtures estão definidas.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ Step Debugger  pedido_valido ▾  expect_ok pedido ▾  rule ▾│
+│ ⏮  ◀  Step 2/3  ▶  ⏭  ▶▶                               │
+├─────────────────────────────────────────────────────────┤
+│ Bindings                                                │
+│   status = pending   owner.active = true   id = u-1    │
+├─────────────────────────────────────────────────────────┤
+│ ✓  status = approved                false              │
+│ ⚡  active(owner)                   [atual]            │
+│ ·  (if status = approved then ...)  futuro             │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Selecione qualquer **fixture**, **expect** e **regra** para traçar
+- Avance manualmente com ◀ ▶, pule ao final com ⏭, ou use auto-play a 650 ms/passo com ▶▶
+- Cada sub-expressão é mostrada **indentada pela profundidade** na árvore
+- Step atual: destaque âmbar ⚡
+- Steps passados: ✓ verde (verdadeiro) / ✗ vermelho (falso)
+- Steps curto-circuitados: ⟳ cinza + riscado (não avaliados por short-circuit de E/OU/→)
+- Steps futuros: opacos
+- Veredicto final no último step: **rule holds** (verde) ou **rule violated** (vermelho)
 
 #### Funcionalidades adicionais
 - **Feedback de parse em tempo real** — erros exibidos com número de linha enquanto você digita.
 - **Painel de modelo analisado** — mostra sorts, entidades, campos e regras em resumo legível.
 - **Referência de Sintaxe** — cartões ricos explicando cada keyword: tagline, explicação, exemplo de sintaxe e código gerado para as três linguagens.
 - **Tabela FOL → RDM** — mostra como cada keyword FOL mapeia para seu papel no Rich Domain Model em Java, TypeScript e Python.
+- **Abas de linguagem** — alterne entre Java, TypeScript e Python com um clique.
 - **Copiar & Baixar** — copie o código gerado ou baixe como `.java` / `.ts` / `.py`.
 - **Sidebar colapsável** — clique na seta `‹` no cabeçalho da sidebar para ocultar a navegação e ganhar espaço total. Uma aba `›` aparece na borda esquerda para restaurar. Em mobile, um botão **Menu** aparece no topo do conteúdo.
 
