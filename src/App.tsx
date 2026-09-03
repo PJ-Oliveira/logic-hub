@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table, Braces } from 'lucide-react';
+import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table, Braces, ChevronLeft, ChevronRight } from 'lucide-react';
 import { translations, Language } from './i18n';
 import { PropositionalTableau } from './tabs/PropositionalTableau';
 import { FirstOrderLogic } from './tabs/FirstOrderLogic';
@@ -14,6 +14,7 @@ type Tab = 'truthTable' | 'propTableau' | 'singularTerms' | 'fol' | 'predicate' 
 export default function App() {
   const [lang, setLang] = useState<Language>('en');
   const [activeTab, setActiveTab] = useState<Tab>('truthTable');
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const t = translations[lang];
 
@@ -23,9 +24,25 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-sand-50 text-sand-900 font-sans flex flex-col md:flex-row">
-      <aside className="w-full md:w-64 bg-white border-b md:border-b-0 md:border-r border-sand-200 shadow-sm flex flex-col">
-        <div className="p-6 border-b border-sand-200 flex items-center justify-between">
-          <h2 className="text-2xl font-black text-sand-900 tracking-tight">{t.appTitle}</h2>
+      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+      <aside className={`
+        bg-white border-sand-200 shadow-sm flex flex-col shrink-0
+        transition-all duration-300 ease-in-out
+        border-b md:border-b-0 md:border-r
+        ${sidebarOpen
+          ? 'w-full md:w-64 max-h-screen md:max-h-none'
+          : 'overflow-hidden w-full max-h-0 md:max-h-none md:w-0'
+        }
+      `}>
+        <div className="p-6 border-b border-sand-200 flex items-center justify-between min-w-0">
+          <h2 className="text-2xl font-black text-sand-900 tracking-tight whitespace-nowrap overflow-hidden">{t.appTitle}</h2>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="p-1.5 rounded-md text-sand-300 hover:text-sand-600 hover:bg-sand-100 transition-colors shrink-0 ml-3"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft size={16} />
+          </button>
         </div>
         
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
@@ -106,7 +123,28 @@ export default function App() {
         </div>
       </aside>
 
+      {/* ── Floating re-open pill (desktop only) ────────────────────────── */}
+      {!sidebarOpen && (
+        <button
+          onClick={() => setSidebarOpen(true)}
+          className="hidden md:flex fixed left-0 top-7 z-50 bg-white border border-l-0 border-sand-200 rounded-r-lg shadow-md px-1.5 py-3 items-center text-sand-400 hover:text-sand-700 hover:shadow-lg transition-all"
+          title="Open sidebar"
+        >
+          <ChevronRight size={14} />
+        </button>
+      )}
+
       <main className="flex-1 p-8 overflow-y-auto h-screen relative">
+        {/* Mobile re-open button */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden mb-5 flex items-center gap-2 text-xs text-sand-500 hover:text-sand-800 border border-sand-200 bg-white rounded-lg px-3 py-2 shadow-sm transition-colors"
+          >
+            <ChevronRight size={12} />
+            Menu
+          </button>
+        )}
         <div className="max-w-5xl mx-auto">
           {activeTab === 'truthTable' && <TruthTable lang={lang} />}
           {activeTab === 'singularTerms' && <SingularTerms lang={lang} />}

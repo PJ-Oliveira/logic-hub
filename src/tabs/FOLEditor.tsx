@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { AlertCircle, CheckCircle2, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
-import { parse, exprToString } from '../fol-dsl';
-import { generate, type Lang } from '../fol-codegen';
+import { parse, exprToString, runFixtures, autoDebug } from '../fol-dsl';
+import { generate, generateTests, type Lang } from '../fol-codegen';
 import { type Language } from '../i18n';
 
 const EXAMPLE = `// ── Rich Domain Model in Finite First-Order Logic ──────────────────
@@ -38,7 +38,31 @@ value Money {
 }
 
 invariant admin_always_active:
-  forall u: User. hasRole(u, admin) => u.active = true;`;
+  forall u: User. hasRole(u, admin) => u.active = true;
+
+// ── Fixtures (debug in FOL, before codegen) ──────────────────────────────────
+
+fixture valid_order {
+  let buyer = User { id: "u-1", active: true, roles: { user } };
+  let order = Order { id: "o-1", owner: buyer, status: pending };
+  expect_ok order;
+}
+
+fixture rejected_order_for_admin {
+  let admin = User { id: "u-2", active: true, roles: { admin } };
+  let order = Order { id: "o-2", owner: admin, status: rejected };
+  expect_violation no_rejected_for_admins in order;
+}
+
+fixture invalid_money {
+  let price = Money { amount: -5, currency: BRL };
+  expect_violation positive_amount in price;
+}
+
+fixture valid_money {
+  let price = Money { amount: 99.9, currency: USD };
+  expect_ok price;
+}`;
 
 type SGEntry = { kw: string; tagline: string; body?: string; syntax?: string; gen?: string };
 type SGSection = { title: string; rich?: boolean; entries: SGEntry[] };
@@ -129,6 +153,7 @@ const SYNTAX_GUIDE: SGSection[] = [
 ];
 
 const LANG_LABELS: Record<Lang, string> = { java: 'Java 17+', ts: 'TypeScript', python: 'Python' };
+const LANG_TAB: Record<Lang, string>    = { java: 'Java', ts: 'TS', python: 'Python' };
 const LANG_EXT: Record<Lang, string>    = { java: 'java', ts: 'ts', python: 'py' };
 
 const RDM_MAP = [
@@ -228,19 +253,25 @@ export function FOLEditor({ lang }: { lang: Language }) {
   const [copied, setCopied] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
   const [showRDM, setShowRDM] = useState(false);
+  const [outputMode, setOutputMode] = useState<'code' | 'tests'>('code');
 
   const result = useMemo(() => parse(spec), [spec]);
   const code = useMemo(() => {
     if (result.ok) return generate(activeLang, result.program);
     return '';
   }, [result, activeLang]);
-
-  function handleCopy() {
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  }
+  const fixtureResults = useMemo(() => {
+    if (!result.ok) return [];
+    return runFixtures(result.fixtures, result.program);
+  }, [result]);
+  const autoResults = useMemo(() => {
+    if (!result.ok) return [];
+    return autoDebug(result.program);
+  }, [result]);
+  const testCode = useMemo(() => {
+    if (!result.ok) return '';
+    return generateTests(activeLang, result.fixtures, result.program);
+  }, [result, activeLang]);
 
   function handleDownload() {
     const ext = LANG_EXT[activeLang];
@@ -357,6 +388,96 @@ export function FOLEditor({ lang }: { lang: Language }) {
             </div>
           )}
 
+          {/* ── Auto Debug: rule coverage ── */}
+          {autoResults.length > 0 && (
+            <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-sand-100 bg-sand-50">
+                <span className="text-xs font-semibold text-sand-600 uppercase tracking-wide">Debug · Rule Coverage</span>
+                <span className="ml-auto text-[10px] text-sand-400">auto-generated · all scenarios</span>
+              </div>
+              <div className="divide-y divide-sand-50">
+                {autoResults.map(res => (
+                  <div key={res.entityName} className="px-4 py-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-bold text-sand-800 font-mono">{res.entityName}</span>
+                      <span className="text-[10px] text-sand-400">{res.entityKind}</span>
+                      <span className="text-[10px] text-sand-400 ml-auto">{res.cases.length} scenarios evaluated</span>
+                    </div>
+                    {/* Coverage per rule */}
+                    <div className="space-y-1.5 mb-3">
+                      {Object.entries(res.rulesCoverage).map(([rule, cov]) => (
+                        <div key={rule} className="flex items-center gap-2 text-xs">
+                          <span className="font-mono text-sand-600 truncate flex-1">{rule}</span>
+                          <span className="text-green-600 shrink-0">{cov.hold} hold</span>
+                          <span className={`shrink-0 ${cov.violation > 0 ? 'text-red-500' : 'text-sand-300'}`}>
+                            {cov.violation} violation{cov.violation !== 1 ? 's' : ''}
+                          </span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold shrink-0 ${
+                            cov.violation > 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-600'
+                          }`}>
+                            {cov.violation > 0 ? '✓ coverable' : '! never fires'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Violation examples */}
+                    {res.cases.filter(c => c.firedRules.length > 0).slice(0, 3).map((c, i) => (
+                      <div key={i} className="text-[10px] font-mono bg-red-50 border border-red-100 rounded px-2 py-1 mb-1 text-red-700 leading-relaxed">
+                        <span className="font-bold">[violation]</span> {c.firedRules.join(', ')} ← {c.label}
+                      </div>
+                    ))}
+                    {res.cases.filter(c => c.firedRules.length === 0).slice(0, 1).map((c, i) => (
+                      <div key={i} className="text-[10px] font-mono bg-green-50 border border-green-100 rounded px-2 py-1 mb-1 text-green-700 leading-relaxed">
+                        <span className="font-bold">[valid]</span> {c.label}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Manual fixtures ── */}
+          {fixtureResults.length > 0 && (
+            <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
+              <div className="flex items-center gap-2 px-4 py-3 border-b border-sand-100 bg-sand-50">
+                <span className="text-xs font-semibold text-sand-600 uppercase tracking-wide">Fixtures · Manual</span>
+                <span className="ml-auto text-[10px] font-mono text-sand-400">
+                  {fixtureResults.flatMap(f => f.expects).filter(e => e.pass).length}/{fixtureResults.flatMap(f => f.expects).length} passing
+                </span>
+              </div>
+              <div className="divide-y divide-sand-50">
+                {fixtureResults.map(fx => (
+                  <div key={fx.fixtureName} className="px-4 py-3">
+                    <div className="text-xs font-bold text-sand-700 mb-2 font-mono">{fx.fixtureName}</div>
+                    <div className="space-y-1.5">
+                      {fx.expects.map((exp, j) => (
+                        <div key={j} className={`flex items-start gap-2 text-xs rounded-lg px-3 py-2 border ${
+                          exp.pass ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'
+                        }`}>
+                          <span className={`font-bold shrink-0 ${exp.pass ? 'text-green-600' : 'text-red-500'}`}>
+                            {exp.pass ? 'PASS' : 'FAIL'}
+                          </span>
+                          <span className="font-mono text-sand-700">
+                            {exp.expected === 'ok'
+                              ? `expect_ok ${exp.varName}`
+                              : `expect_violation ${exp.ruleName} in ${exp.varName}`}
+                          </span>
+                          {!exp.pass && exp.firedRule && exp.expected === 'ok' && (
+                            <span className="text-red-400 ml-auto shrink-0">rule '{exp.firedRule}' fired</span>
+                          )}
+                          {!exp.pass && !exp.firedRule && exp.expected === 'violation' && (
+                            <span className="text-red-400 ml-auto shrink-0">no rule fired</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* FOL → RDM mapping */}
           <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
             <button
@@ -454,13 +575,30 @@ export function FOLEditor({ lang }: { lang: Language }) {
         {/* ── Right: generated code ── */}
         <div className="flex flex-col gap-4">
           <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-            {/* lang tabs */}
-            <div className="flex items-center border-b border-sand-100 bg-sand-50">
-              {(Object.entries(LANG_LABELS) as [Lang, string][]).map(([l, label]) => (
+            {/* mode toggle + lang tabs — flex-wrap so Copy/Download never gets cut off */}
+            <div className="flex flex-wrap items-center border-b border-sand-100 bg-sand-50">
+              {/* Code / Tests toggle */}
+              <div className="flex shrink-0 border-r border-sand-100">
+                {(['code', 'tests'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => setOutputMode(mode)}
+                    className={`px-3 py-3 text-xs font-semibold transition-colors border-b-2 ${
+                      outputMode === mode
+                        ? 'border-sand-700 text-sand-900 bg-white'
+                        : 'border-transparent text-sand-400 hover:text-sand-700'
+                    }`}
+                  >
+                    {mode === 'code' ? 'Code' : 'Tests'}
+                  </button>
+                ))}
+              </div>
+              {(Object.entries(LANG_TAB) as [Lang, string][]).map(([l, label]) => (
                 <button
                   key={l}
                   onClick={() => setActiveLang(l)}
-                  className={`px-5 py-3 text-xs font-semibold transition-colors border-b-2 ${
+                  title={LANG_LABELS[l]}
+                  className={`shrink-0 px-3 py-3 text-xs font-semibold transition-colors border-b-2 ${
                     activeLang === l
                       ? 'border-sand-700 text-sand-900 bg-white'
                       : 'border-transparent text-sand-400 hover:text-sand-700'
@@ -469,31 +607,38 @@ export function FOLEditor({ lang }: { lang: Language }) {
                   {label}
                 </button>
               ))}
-              <div className="flex-1" />
               {result.ok && (
-                <div className="flex gap-1 px-3">
+                <div className="flex gap-1 px-3 py-1.5 ml-auto shrink-0">
                   <button
-                    onClick={handleCopy}
+                    onClick={() => {
+                      const content = outputMode === 'code' ? code : testCode;
+                      navigator.clipboard.writeText(content).then(() => {
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1800);
+                      });
+                    }}
                     className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border border-sand-200 bg-white text-sand-600 hover:bg-sand-50 transition-colors"
                   >
                     {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                     {copied ? t.copied : t.copy}
                   </button>
-                  <button
-                    onClick={handleDownload}
-                    className="text-xs px-3 py-1.5 rounded-md bg-sand-900 text-white hover:bg-sand-800 transition-colors"
-                  >
-                    {t.download}
-                  </button>
+                  {outputMode === 'code' && (
+                    <button
+                      onClick={handleDownload}
+                      className="text-xs px-3 py-1.5 rounded-md bg-sand-900 text-white hover:bg-sand-800 transition-colors"
+                    >
+                      {t.download}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
 
-            {/* code output */}
+            {/* output */}
             <div className="overflow-auto" style={{ background: '#3a2611', minHeight: '420px' }}>
               {result.ok ? (
                 <pre className="text-xs font-mono p-5 leading-relaxed whitespace-pre-wrap break-words" style={{ color: '#faf0e6' }}>
-                  {code}
+                  {outputMode === 'code' ? code : testCode}
                 </pre>
               ) : (
                 <div className="flex items-center justify-center h-64 text-sand-500 text-xs">
