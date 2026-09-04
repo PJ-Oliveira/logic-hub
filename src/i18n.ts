@@ -10,7 +10,8 @@ export const translations = {
       fol: 'First-Order Logic',
       predicate: 'Predicate Calculus',
       aristotelian: 'Aristotelian Square',
-      folEditor: 'FOL Spec Editor'
+      folEditor: 'FOL Spec Editor',
+      argumentChecker: 'Argument Validator',
     },
     truthTable: {
       title: 'Truth Tables (Tabelas-Verdade)',
@@ -180,7 +181,8 @@ export const translations = {
       fol: 'Lógica de 1ª Ordem',
       predicate: 'Cálculo de Predicados',
       aristotelian: 'Quadrado Aristotélico',
-      folEditor: 'Editor FOL'
+      folEditor: 'Editor FOL',
+      argumentChecker: 'Verificador de Argumentos',
     },
     truthTable: {
       title: 'Tabelas-Verdade Interativas',

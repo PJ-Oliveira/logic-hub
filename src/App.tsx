@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table, Braces, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Globe, GitMerge, FileDigit, Square, Type, FileSignature, Table, Braces, Scale, ChevronLeft, ChevronRight } from 'lucide-react';
 import { translations, Language } from './i18n';
 import { PropositionalTableau } from './tabs/PropositionalTableau';
 import { FirstOrderLogic } from './tabs/FirstOrderLogic';
@@ -8,8 +8,9 @@ import { SingularTerms } from './tabs/SingularTerms';
 import { TruthTable } from './tabs/TruthTable';
 import { PredicateCalculus } from './tabs/PredicateCalculus';
 import { FOLEditor } from './tabs/FOLEditor';
+import { ArgumentChecker } from './tabs/ArgumentChecker';
 
-type Tab = 'truthTable' | 'propTableau' | 'singularTerms' | 'fol' | 'predicate' | 'aristotelian' | 'folEditor';
+type Tab = 'truthTable' | 'propTableau' | 'singularTerms' | 'fol' | 'predicate' | 'aristotelian' | 'folEditor' | 'argumentChecker';
 
 export default function App() {
   const [lang, setLang] = useState<Language>('en');
@@ -101,6 +102,14 @@ export default function App() {
             <Braces size={18} className={activeTab === 'folEditor' ? 'text-sand-700' : 'text-sand-400'} />
             {t.tabs.folEditor}
           </button>
+
+          <button
+            onClick={() => setActiveTab('argumentChecker')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left text-sm font-semibold transition-colors ${activeTab === 'argumentChecker' ? 'bg-sand-100 text-sand-900 border border-sand-300 shadow-inner' : 'text-sand-700 hover:bg-sand-50 hover:text-sand-900 border border-transparent'}`}
+          >
+            <Scale size={18} className={activeTab === 'argumentChecker' ? 'text-sand-700' : 'text-sand-400'} />
+            {t.tabs.argumentChecker}
+          </button>
         </nav>
 
         <div className="p-4 border-t border-sand-200">
@@ -153,6 +162,7 @@ export default function App() {
           {activeTab === 'predicate' && <PredicateCalculus lang={lang} />}
           {activeTab === 'aristotelian' && <AristotelianSquare lang={lang} />}
           {activeTab === 'folEditor' && <FOLEditor lang={lang} />}
+          {activeTab === 'argumentChecker' && <ArgumentChecker lang={lang} />}
         </div>
       </main>
     </div>

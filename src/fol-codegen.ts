@@ -1,10 +1,12 @@
-import type { Program, Entity, Field, Expr, Sort, Axiom, Fixture, FieldValue } from './fol-dsl';
+import type { Program, Entity, Field, Expr, Sort, Axiom, Fixture, FieldValue, Bindings } from './fol-dsl';
+import { autoDebug } from './fol-dsl';
 
 export type Lang = 'java' | 'ts' | 'python';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function cap(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
+function sc(s: string): string { return s.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase(); }
 
 const INVERSE_OP: Record<string, string> = { '>': '<=', '<': '>=', '>=': '<', '<=': '>' };
 
@@ -675,4 +677,258 @@ function generatePythonTests(fixtures: Fixture[], program: Program): string {
     }
   }
   return out.join('\n');
+}
+
+// ─── Test Codegen from Entity Rules (no fixtures required) ───────────────────
+
+function javaArgFor(
+  f: Field, bindings: Bindings, prefix: string,
+  program: Program, declared: Set<string>,
+): { setup: string[]; expr: string } {
+  const key = prefix ? `${prefix}.${f.name}` : f.name;
+  const val = bindings[key];
+  if (f.type.kind === 'ref') {
+    const rn = f.type.name;
+    const re = program.entities.find(e => e.name === rn);
+    if (re) {
+      const vname = key.replace(/\./g, '_');
+      if (declared.has(vname)) return { setup: [], expr: vname };
+      declared.add(vname);
+      const subs = re.fields.map(rf => javaArgFor(rf, bindings, key, program, declared));
+      const setup = subs.flatMap(s => s.setup);
+      setup.push(`var ${vname} = ${rn}.create(${subs.map(s => s.expr).join(', ')});`);
+      return { setup, expr: vname };
+    }
+    return { setup: [], expr: `/* ${f.type.name} */` };
+  }
+  if (val !== undefined) return { setup: [], expr: fieldValueToJava(val, f.name, program) };
+  if (f.type.kind === 'primitive') {
+    const d: Record<string, string> = { UUID: `"${f.name}-1"`, String: `"${f.name}"`, Boolean: 'true', Int: '1', Float: '1.0', Long: '1L', Double: '1.0' };
+    return { setup: [], expr: d[f.type.name] ?? '""' };
+  }
+  if (f.type.kind === 'set')  return { setup: [], expr: 'java.util.Set.of()' };
+  if (f.type.kind === 'list') return { setup: [], expr: 'java.util.List.of()' };
+  return { setup: [], expr: `/* ${f.name} */` };
+}
+
+function tsArgFor(
+  f: Field, bindings: Bindings, prefix: string,
+  program: Program, declared: Set<string>,
+): { setup: string[]; expr: string } {
+  const key = prefix ? `${prefix}.${f.name}` : f.name;
+  const val = bindings[key];
+  if (f.type.kind === 'ref') {
+    const rn = f.type.name;
+    const re = program.entities.find(e => e.name === rn);
+    if (re) {
+      const vname = key.replace(/\./g, '_');
+      if (declared.has(vname)) return { setup: [], expr: `${vname}.value!` };
+      declared.add(vname);
+      const subs = re.fields.map(rf => tsArgFor(rf, bindings, key, program, declared));
+      const setup = subs.flatMap(s => s.setup);
+      setup.push(`const ${vname} = create${rn}(${subs.map(s => s.expr).join(', ')});`);
+      return { setup, expr: `${vname}.value!` };
+    }
+    return { setup: [], expr: `/* ${f.type.name} */` };
+  }
+  if (val !== undefined) return { setup: [], expr: fieldValueToTS(val, program) };
+  if (f.type.kind === 'primitive') {
+    const d: Record<string, string> = { UUID: `'${f.name}-1'`, String: `'${f.name}'`, Boolean: 'true', Int: '1', Float: '1.0', Long: '1', Double: '1.0' };
+    return { setup: [], expr: d[f.type.name] ?? "''" };
+  }
+  if (f.type.kind === 'set')  return { setup: [], expr: 'new Set()' };
+  if (f.type.kind === 'list') return { setup: [], expr: '[]' };
+  return { setup: [], expr: `/* ${f.name} */` };
+}
+
+function pyArgFor(
+  f: Field, bindings: Bindings, prefix: string,
+  program: Program, declared: Set<string>,
+): { setup: string[]; expr: string } {
+  const key = prefix ? `${prefix}.${f.name}` : f.name;
+  const val = bindings[key];
+  if (f.type.kind === 'ref') {
+    const rn = f.type.name;
+    const re = program.entities.find(e => e.name === rn);
+    if (re) {
+      const vname = key.replace(/\./g, '_');
+      if (declared.has(vname)) return { setup: [], expr: vname };
+      declared.add(vname);
+      const subs = re.fields.map(rf => pyArgFor(rf, bindings, key, program, declared));
+      const setup = subs.flatMap(s => s.setup);
+      const kwargs = re.fields.map((rf, i) => `${rf.name}=${subs[i].expr}`).join(', ');
+      setup.push(`${vname} = ${rn}(${kwargs})`);
+      return { setup, expr: vname };
+    }
+    return { setup: [], expr: `# ${f.type.name}` };
+  }
+  if (val !== undefined) return { setup: [], expr: fieldValueToPy(val, program) };
+  if (f.type.kind === 'primitive') {
+    const d: Record<string, string> = { UUID: `"${f.name}-1"`, String: `"${f.name}"`, Boolean: 'True', Int: '1', Float: '1.0', Long: '1', Double: '1.0' };
+    return { setup: [], expr: d[f.type.name] ?? '""' };
+  }
+  if (f.type.kind === 'set')  return { setup: [], expr: 'frozenset()' };
+  if (f.type.kind === 'list') return { setup: [], expr: '[]' };
+  return { setup: [], expr: `# ${f.name}` };
+}
+
+// ── Naming helpers for per-case test methods ─────────────────────────────────
+
+function safeName(s: string): string {
+  return s.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40);
+}
+
+function caseMethodSuffix(idx: number, firedRules: string[]): string {
+  const n = String(idx + 1).padStart(3, '0');
+  if (firedRules.length === 0) return `${n}_isValid`;
+  const rules = firedRules.map(r => safeName(r)).join('_and_').slice(0, 60);
+  return `${n}_violates_${rules}`;
+}
+
+// ── Java: one @Test per case ──────────────────────────────────────────────────
+
+function generateJavaRuleTests(program: Program): string {
+  const results = autoDebug(program);
+  const totalCases = results.reduce((s, r) => s + r.cases.length, 0);
+  const out: string[] = [];
+  const w = (...lines: string[]) => out.push(...lines);
+  w(
+    '// Generated by Logic Hub — entity rule tests',
+    `// ${totalCases} test(s) auto-derived from spec — Java 17+ · JUnit 5 · Rich Domain Model`,
+    '// Zero manual fixtures needed: every possible state is covered.',
+    '',
+    'import org.junit.jupiter.api.Test;',
+    'import static org.junit.jupiter.api.Assertions.*;',
+    '',
+    'class DomainRuleTests {',
+  );
+  for (const { entityName, cases } of results) {
+    const entity = program.entities.find(e => e.name === entityName)!;
+    w('', `    // ── ${entityName} (${cases.filter(c => c.firedRules.length === 0).length} valid · ${cases.filter(c => c.firedRules.length > 0).length} invalid) ──`);
+    cases.forEach((c, idx) => {
+      const suffix = caseMethodSuffix(idx, c.firedRules);
+      const isValid = c.firedRules.length === 0;
+      w('', `    // ${c.label}`);
+      w(`    @Test`, `    void ${sc(entityName)}_${suffix}() {`);
+      const declared = new Set<string>();
+      const subs = entity.fields.map(f => javaArgFor(f, c.bindings, '', program, declared));
+      subs.forEach(s => s.setup.forEach(l => w(`        ${l}`)));
+      const args = subs.map(s => s.expr).join(', ');
+      if (isValid) {
+        w(`        assertDoesNotThrow(() -> ${entityName}.create(${args}));`);
+      } else {
+        w(
+          `        var ex = assertThrows(DomainException.class, () ->`,
+          `            ${entityName}.create(${args}));`,
+          `        // fired: ${c.firedRules.join(', ')}`,
+          `        assertTrue(java.util.List.of(${c.firedRules.map(r => `"${r}"`).join(', ')}).contains(ex.getRule()));`,
+        );
+      }
+      w(`    }`);
+    });
+  }
+  w('}');
+  return out.join('\n');
+}
+
+// ── TypeScript/Vitest: one test() per case ────────────────────────────────────
+
+function generateTSRuleTests(program: Program): string {
+  const results = autoDebug(program);
+  const totalCases = results.reduce((s, r) => s + r.cases.length, 0);
+  const out: string[] = [];
+  const w = (...lines: string[]) => out.push(...lines);
+  w(
+    '// Generated by Logic Hub — entity rule tests',
+    `// ${totalCases} test(s) auto-derived from spec — TypeScript · Vitest · Rich Domain Model`,
+    '// Zero manual fixtures needed: every possible state is covered.',
+    '',
+    "import { describe, test, expect } from 'vitest';",
+    "// import { create* } from './generated';",
+    '',
+  );
+  for (const { entityName, cases } of results) {
+    const entity = program.entities.find(e => e.name === entityName)!;
+    w(`describe('${entityName}', () => {`);
+    cases.forEach((c, idx) => {
+      const suffix = caseMethodSuffix(idx, c.firedRules);
+      const isValid = c.firedRules.length === 0;
+      const label = isValid
+        ? `valid — ${c.label}`
+        : `violates [${c.firedRules.join(', ')}] — ${c.label}`;
+      w('');
+      w(`    // case ${idx + 1}: ${c.label}`);
+      w(`    test('${suffix.replace(/_/g, ' ')} | ${label.slice(0, 80)}', () => {`);
+      const declared = new Set<string>();
+      const subs = entity.fields.map(f => tsArgFor(f, c.bindings, '', program, declared));
+      subs.forEach(s => s.setup.forEach(l => w(`        ${l}`)));
+      const args = subs.map(s => s.expr).join(', ');
+      w(`        const result = create${entityName}(${args});`);
+      if (isValid) {
+        w(`        expect(result.ok).toBe(true);`);
+      } else {
+        w(
+          `        expect(result.ok).toBe(false);`,
+          `        if (!result.ok) expect(${JSON.stringify(c.firedRules)}).toContain(result.error);`,
+        );
+      }
+      w(`    });`);
+    });
+    w(`});`, '');
+  }
+  return out.join('\n');
+}
+
+// ── Python/pytest: one def test_ per case ─────────────────────────────────────
+
+function generatePythonRuleTests(program: Program): string {
+  const results = autoDebug(program);
+  const totalCases = results.reduce((s, r) => s + r.cases.length, 0);
+  const out: string[] = [];
+  const w = (...lines: string[]) => out.push(...lines);
+  w(
+    '# Generated by Logic Hub — entity rule tests',
+    `# ${totalCases} test(s) auto-derived from spec — Python 3.10+ · pytest · Rich Domain Model`,
+    '# Zero manual fixtures needed: every possible state is covered.',
+    '',
+    'import pytest',
+    '# from your_module import the generated classes',
+    '',
+  );
+  for (const { entityName, cases } of results) {
+    const entity = program.entities.find(e => e.name === entityName)!;
+    w(`class Test${entityName}:`);
+    cases.forEach((c, idx) => {
+      const suffix = caseMethodSuffix(idx, c.firedRules);
+      const isValid = c.firedRules.length === 0;
+      w('');
+      w(`    # ${c.label}`);
+      w(`    def test_${sc(entityName)}_${suffix}(self):`);
+      const declared = new Set<string>();
+      const subs = entity.fields.map(f => pyArgFor(f, c.bindings, '', program, declared));
+      subs.forEach(s => s.setup.forEach(l => w(`        ${l}`)));
+      const kwargs = entity.fields.map((f, i) => `${f.name}=${subs[i].expr}`).join(', ');
+      if (isValid) {
+        w(`        ${entityName}(${kwargs})  # no DomainError expected`);
+      } else {
+        w(
+          `        with pytest.raises(DomainError) as exc:`,
+          `            ${entityName}(${kwargs})`,
+          `        assert exc.value.rule in ${JSON.stringify(c.firedRules)}`,
+        );
+      }
+    });
+    w('', '');
+  }
+  return out.join('\n');
+}
+
+export function generateRuleTests(lang: Lang, program: Program): string {
+  if (!program.entities.some(e => e.axioms.length > 0)) {
+    const msg = 'No rules found.\nAdd rule blocks inside entity or value declarations.';
+    return lang === 'python' ? `# ${msg.replace(/\n/g, '\n# ')}` : `// ${msg.replace(/\n/g, '\n// ')}`;
+  }
+  if (lang === 'java')   return generateJavaRuleTests(program);
+  if (lang === 'ts')     return generateTSRuleTests(program);
+  return generatePythonRuleTests(program);
 }

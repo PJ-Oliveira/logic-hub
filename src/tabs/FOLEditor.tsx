@@ -1,9 +1,7 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
-import { AlertCircle, CheckCircle2, Copy, Check, ChevronDown, ChevronUp,
-         SkipBack, SkipForward, ChevronRight as StepNext, ChevronLeft as StepPrev,
-         Play, Pause } from 'lucide-react';
-import { parse, exprToString, evalTrace } from '../fol-dsl';
-import { generate, type Lang } from '../fol-codegen';
+import { useState, useMemo } from 'react';
+import { AlertCircle, CheckCircle2, Copy, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { parse, exprToString, autoDebug, type AutoDebugResult } from '../fol-dsl';
+import { generate, generateRuleTests, type Lang } from '../fol-codegen';
 import { type Language } from '../i18n';
 
 const EXAMPLE = `// ── Rich Domain Model in Finite First-Order Logic ──────────────────
@@ -252,91 +250,38 @@ export function FOLEditor({ lang }: { lang: Language }) {
   const t = i18n[lang];
   const [spec, setSpec] = useState(EXAMPLE);
   const [activeLang, setActiveLang] = useState<Lang>('java');
+  const [outputMode, setOutputMode] = useState<'code' | 'tests'>('code');
   const [copied, setCopied] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
   const [showRDM, setShowRDM] = useState(false);
 
-  // ── Step Debugger state ──────────────────────────────────────────────────
-  const [debugFxIdx, setDebugFxIdx]     = useState(0);
-  const [debugExpIdx, setDebugExpIdx]   = useState(0);
-  const [debugRuleIdx, setDebugRuleIdx] = useState(0);
-  const [debugStep, setDebugStep]       = useState(0);
-  const [playing, setPlaying]           = useState(false);
-  const traceRef = useRef<HTMLDivElement>(null);
+  const [showScenarios, setShowScenarios] = useState(true);
+  const [scenarioEntity, setScenarioEntity] = useState(0);
 
   const result = useMemo(() => parse(spec), [spec]);
+  const autoScenarios = useMemo<AutoDebugResult[]>(
+    () => (result.ok ? autoDebug(result.program) : []),
+    [result],
+  );
   const code = useMemo(() => {
     if (result.ok) return generate(activeLang, result.program);
     return '';
   }, [result, activeLang]);
-
-  // ── Debug trace computation ──────────────────────────────────────────────
-  const debugCtx = useMemo(() => {
-    if (!result.ok || result.fixtures.length === 0) return null;
-    const fx = result.fixtures[debugFxIdx] ?? result.fixtures[0];
-    if (!fx || fx.expects.length === 0) return null;
-    const exp = fx.expects[debugExpIdx] ?? fx.expects[0];
-    if (!exp) return null;
-    const inst = fx.instances.find(i => i.varName === exp.varName);
-    if (!inst) return null;
-    const entity = result.program.entities.find(e => e.name === inst.entityName);
-    if (!entity || entity.axioms.length === 0) return null;
-    const axiom = entity.axioms[debugRuleIdx] ?? entity.axioms[0];
-    if (!axiom) return null;
-
-    // build bindings (same cross-instance resolution as runFixtures)
-    const allBindings: Record<string, import('../fol-dsl').FieldValue> = {};
-    for (const i of fx.instances) {
-      for (const [k, v] of Object.entries(i.fields)) {
-        allBindings[k] = v;
-        allBindings[`${i.varName}.${k}`] = v;
-      }
-    }
-    for (const i of fx.instances) {
-      for (const [fieldName, fieldVal] of Object.entries(i.fields)) {
-        if (typeof fieldVal !== 'string') continue;
-        const ref = fx.instances.find(r => r.varName === fieldVal);
-        if (!ref) continue;
-        for (const [k, v] of Object.entries(ref.fields)) {
-          allBindings[`${fieldName}.${k}`] = v;
-        }
-      }
-    }
-    const bindings = { ...allBindings, ...inst.fields };
-
-    const trace = evalTrace(axiom.expr, bindings, result.program);
-    return { fx, exp, inst, entity, axiom, bindings, trace };
-  }, [result, debugFxIdx, debugExpIdx, debugRuleIdx]);
-
-  // reset step when trace changes
-  useEffect(() => { setDebugStep(0); setPlaying(false); }, [debugCtx]);
-
-  // auto-play
-  const traceLen = debugCtx?.trace.steps.length ?? 0;
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      setDebugStep(s => {
-        if (s >= traceLen - 1) { setPlaying(false); return s; }
-        return s + 1;
-      });
-    }, 650);
-    return () => clearInterval(id);
-  }, [playing, traceLen]);
-
-  // scroll current step into view
-  useEffect(() => {
-    if (!traceRef.current) return;
-    const el = traceRef.current.querySelector('[data-current="true"]');
-    el?.scrollIntoView({ block: 'nearest' });
-  }, [debugStep]);
+  const testCode = useMemo(() => {
+    if (result.ok) return generateRuleTests(activeLang, result.program);
+    return '';
+  }, [result, activeLang]);
 
   function handleDownload() {
     const ext = LANG_EXT[activeLang];
-    const blob = new Blob([code], { type: 'text/plain' });
+    const content = outputMode === 'code' ? code : testCode;
+    const filename = outputMode === 'tests'
+      ? (activeLang === 'java' ? 'DomainRuleTests.java' : activeLang === 'ts' ? 'domain.test.ts' : 'test_domain.py')
+      : `model.${ext}`;
+    const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `model.${ext}`; a.click();
+    a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -446,165 +391,112 @@ export function FOLEditor({ lang }: { lang: Language }) {
             </div>
           )}
 
-          {/* ── Step Debugger ── */}
-          {debugCtx && (
-            <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
-              {/* Header: selectors + controls */}
-              <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 border-b border-sand-100 bg-sand-50">
-                <span className="text-xs font-semibold text-sand-600 uppercase tracking-wide shrink-0">Step Debugger</span>
-                {/* Fixture selector */}
-                <select
-                  value={debugFxIdx}
-                  onChange={e => { setDebugFxIdx(Number(e.target.value)); setDebugExpIdx(0); setDebugRuleIdx(0); }}
-                  className="text-xs border border-sand-200 rounded px-2 py-1 bg-white text-sand-700 focus:outline-none"
+          {/* ── Auto Scenarios panel ── */}
+          {autoScenarios.length > 0 && (() => {
+            const ent = autoScenarios[Math.min(scenarioEntity, autoScenarios.length - 1)];
+            const valid   = ent.cases.filter(c => c.firedRules.length === 0);
+            const invalid = ent.cases.filter(c => c.firedRules.length > 0);
+            const total   = ent.cases.length;
+            return (
+              <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
+                {/* header */}
+                <button
+                  onClick={() => setShowScenarios(v => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-xs font-semibold text-sand-600 uppercase tracking-wide hover:bg-sand-50 transition-colors"
                 >
-                  {result.ok && result.fixtures.map((fx, i) => (
-                    <option key={i} value={i}>{fx.name}</option>
-                  ))}
-                </select>
-                {/* Expect selector */}
-                <select
-                  value={debugExpIdx}
-                  onChange={e => { setDebugExpIdx(Number(e.target.value)); setDebugRuleIdx(0); }}
-                  className="text-xs border border-sand-200 rounded px-2 py-1 bg-white text-sand-700 focus:outline-none"
-                >
-                  {debugCtx.fx.expects.map((exp, i) => (
-                    <option key={i} value={i}>
-                      {exp.kind === 'expect_ok' ? `expect_ok ${exp.varName}` : `expect_violation ${exp.ruleName}`}
-                    </option>
-                  ))}
-                </select>
-                {/* Rule selector */}
-                <select
-                  value={debugRuleIdx}
-                  onChange={e => setDebugRuleIdx(Number(e.target.value))}
-                  className="text-xs border border-sand-200 rounded px-2 py-1 bg-white text-sand-700 focus:outline-none"
-                >
-                  {debugCtx.entity.axioms.map((ax, i) => (
-                    <option key={i} value={i}>rule: {ax.name}</option>
-                  ))}
-                </select>
-                {/* Step controls */}
-                <div className="flex items-center gap-1 ml-auto shrink-0">
-                  <button onClick={() => { setDebugStep(0); setPlaying(false); }} title="Reset"
-                    className="p-1.5 rounded text-sand-400 hover:text-sand-700 hover:bg-sand-100 transition-colors">
-                    <SkipBack size={13} />
-                  </button>
-                  <button onClick={() => setDebugStep(s => Math.max(0, s - 1))} title="Back"
-                    className="p-1.5 rounded text-sand-400 hover:text-sand-700 hover:bg-sand-100 transition-colors">
-                    <StepPrev size={13} />
-                  </button>
-                  <span className="text-[10px] font-mono text-sand-500 px-1 tabular-nums whitespace-nowrap">
-                    {debugStep + 1}/{traceLen}
-                  </span>
-                  <button onClick={() => setDebugStep(s => Math.min(traceLen - 1, s + 1))} title="Next step"
-                    className="p-1.5 rounded text-sand-400 hover:text-sand-700 hover:bg-sand-100 transition-colors">
-                    <StepNext size={13} />
-                  </button>
-                  <button onClick={() => setDebugStep(traceLen - 1)} title="Run to end"
-                    className="p-1.5 rounded text-sand-400 hover:text-sand-700 hover:bg-sand-100 transition-colors">
-                    <SkipForward size={13} />
-                  </button>
-                  <button
-                    onClick={() => { if (debugStep >= traceLen - 1) setDebugStep(0); setPlaying(p => !p); }}
-                    title={playing ? 'Pause' : 'Auto-play'}
-                    className={`p-1.5 rounded transition-colors ${playing ? 'text-amber-600 hover:bg-amber-50' : 'text-sand-400 hover:text-sand-700 hover:bg-sand-100'}`}
-                  >
-                    {playing ? <Pause size={13} /> : <Play size={13} />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Bindings */}
-              <div className="px-4 py-2 border-b border-sand-50 bg-white">
-                <div className="text-[10px] font-bold text-sand-400 uppercase tracking-widest mb-1.5">Bindings</div>
-                <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                  {Object.entries(debugCtx.bindings).map(([k, v]) => (
-                    <span key={k} className="text-[10px] font-mono text-sand-700">
-                      <span className="text-sand-400">{k}</span>
-                      {' = '}
-                      <span className="text-sand-900 font-semibold">
-                        {v instanceof Set ? `{${[...v].join(', ') || '∅'}}` : String(v)}
-                      </span>
+                  <span className="flex items-center gap-2">
+                    Auto Scenarios
+                    <span className="font-mono font-normal text-sand-400 normal-case">
+                      {total} total · <span className="text-emerald-600">✓ {valid.length}</span> · <span className="text-red-500">✗ {invalid.length}</span>
                     </span>
-                  ))}
-                </div>
-              </div>
+                  </span>
+                  {showScenarios ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
 
-              {/* Trace list */}
-              <div ref={traceRef} className="overflow-y-auto max-h-64 divide-y divide-sand-50">
-                {debugCtx.trace.steps.map((step, i) => {
-                  const isCurrent = i === debugStep;
-                  const isPast    = i < debugStep;
-                  const isFuture  = i > debugStep;
-                  return (
-                    <div
-                      key={i}
-                      data-current={isCurrent}
-                      onClick={() => setDebugStep(i)}
-                      style={{ paddingLeft: `${12 + step.depth * 16}px` }}
-                      className={`flex items-center gap-2 pr-4 py-1.5 cursor-pointer transition-colors text-[11px] font-mono
-                        ${isCurrent  ? 'bg-amber-50 border-l-2 border-amber-400' : ''}
-                        ${isPast && !step.skipped && step.result  ? 'bg-green-50/50' : ''}
-                        ${isPast && !step.skipped && !step.result ? 'bg-red-50/50'   : ''}
-                        ${isPast && step.skipped  ? 'opacity-50'  : ''}
-                        ${isFuture ? 'opacity-30' : ''}
-                        hover:bg-sand-50
-                      `}
-                    >
-                      {/* Icon */}
-                      <span className={`shrink-0 w-4 text-center ${
-                        isFuture        ? 'text-sand-300' :
-                        step.skipped    ? 'text-sand-400' :
-                        step.result     ? 'text-green-600' :
-                                          'text-red-500'
-                      }`}>
-                        {isCurrent && !step.skipped ? '⚡' :
-                         step.skipped ? '⟳' :
-                         isPast && step.result  ? '✓' :
-                         isPast && !step.result ? '✗' : '·'}
-                      </span>
-                      {/* Expression */}
-                      <span className={`flex-1 leading-relaxed ${step.skipped ? 'line-through italic' : ''} ${isCurrent ? 'font-semibold text-amber-900' : 'text-sand-700'}`}>
-                        {step.exprStr}
-                      </span>
-                      {/* Result badge */}
-                      {(isPast || isCurrent) && !step.skipped && (
-                        <span className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          step.result
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-red-100 text-red-600'
-                        }`}>
-                          {step.result ? 'true' : 'false'}
-                        </span>
+                {showScenarios && (
+                  <div className="border-t border-sand-100">
+                    {/* entity selector tabs */}
+                    {autoScenarios.length > 1 && (
+                      <div className="flex gap-0.5 px-3 pt-3">
+                        {autoScenarios.map((e, i) => (
+                          <button
+                            key={e.entityName}
+                            onClick={() => setScenarioEntity(i)}
+                            className={`px-3 py-1.5 text-xs rounded-t-lg font-semibold border transition-colors ${
+                              i === Math.min(scenarioEntity, autoScenarios.length - 1)
+                                ? 'border-sand-200 border-b-white bg-white text-sand-900 -mb-px'
+                                : 'border-transparent text-sand-400 hover:text-sand-700'
+                            }`}
+                          >
+                            {e.entityName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="p-4 space-y-3">
+                      {/* rule coverage */}
+                      {Object.keys(ent.rulesCoverage).length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold text-sand-400 uppercase tracking-widest mb-1.5">Rule coverage</div>
+                          <div className="space-y-1">
+                            {Object.entries(ent.rulesCoverage).map(([rule, cov]) => (
+                              <div key={rule} className="flex items-center gap-2 text-xs">
+                                <span className="font-mono text-sand-700 truncate max-w-[180px]" title={rule}>{rule}</span>
+                                <span className="flex items-center gap-1 ml-auto shrink-0">
+                                  <span className="text-emerald-600 font-mono">✓{cov.hold}</span>
+                                  <span className="text-sand-300">·</span>
+                                  <span className={`font-mono ${cov.violation > 0 ? 'text-red-500' : 'text-sand-400'}`}>✗{cov.violation}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
-                      {(isPast || isCurrent) && step.skipped && (
-                        <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-sand-100 text-sand-400">
-                          skip
-                        </span>
+
+                      {/* valid states */}
+                      {valid.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest mb-1.5">
+                            ✓ Valid states ({valid.length})
+                          </div>
+                          <div className="space-y-0.5 max-h-40 overflow-y-auto pr-1">
+                            {valid.map((c, i) => (
+                              <div key={i} className="text-[10px] font-mono bg-emerald-50 border border-emerald-100 rounded px-2 py-1 text-emerald-800 leading-relaxed">
+                                {c.label}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* invalid states */}
+                      {invalid.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold text-red-500 uppercase tracking-widest mb-1.5">
+                            ✗ Invalid states ({invalid.length})
+                          </div>
+                          <div className="space-y-0.5 max-h-52 overflow-y-auto pr-1">
+                            {invalid.map((c, i) => (
+                              <div key={i} className="text-[10px] font-mono bg-red-50 border border-red-100 rounded px-2 py-1 leading-relaxed">
+                                <span className="text-red-800">{c.label}</span>
+                                <span className="text-red-400"> → </span>
+                                <span className="text-red-600 font-semibold">[{c.firedRules.join(', ')}]</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {total === 0 && (
+                        <p className="text-xs text-sand-400 italic">No candidates derived from rules yet.</p>
                       )}
                     </div>
-                  );
-                })}
+                  </div>
+                )}
               </div>
-
-              {/* Final verdict */}
-              {debugStep >= traceLen - 1 && traceLen > 0 && (
-                <div className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-t ${
-                  debugCtx.trace.finalResult
-                    ? 'bg-green-50 text-green-700 border-green-100'
-                    : 'bg-red-50 text-red-600 border-red-100'
-                }`}>
-                  {debugCtx.trace.finalResult
-                    ? <><CheckCircle2 size={13} /> rule holds — object is VALID</>
-                    : <><AlertCircle  size={13} /> rule violated — construction REJECTED</>}
-                  <span className="ml-auto font-mono text-[10px] opacity-70">
-                    {debugCtx.axiom.name}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           {/* FOL → RDM mapping */}
           <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm">
@@ -703,7 +595,7 @@ export function FOLEditor({ lang }: { lang: Language }) {
         {/* ── Right: generated code ── */}
         <div className="flex flex-col gap-4">
           <div className="bg-white border border-sand-200 rounded-xl overflow-hidden shadow-sm flex flex-col">
-            {/* lang tabs */}
+            {/* lang tabs + mode toggle */}
             <div className="flex flex-wrap items-center border-b border-sand-100 bg-sand-50">
               {(Object.entries(LANG_TAB) as [Lang, string][]).map(([l, label]) => (
                 <button
@@ -719,11 +611,26 @@ export function FOLEditor({ lang }: { lang: Language }) {
                   {label}
                 </button>
               ))}
+              <div className="flex items-center gap-0 mx-2 border border-sand-200 rounded overflow-hidden shrink-0">
+                <button
+                  onClick={() => setOutputMode('code')}
+                  className={`px-2 py-1 text-xs font-semibold transition-colors ${outputMode === 'code' ? 'bg-sand-800 text-white' : 'text-sand-500 hover:bg-sand-100'}`}
+                >
+                  Code
+                </button>
+                <button
+                  onClick={() => setOutputMode('tests')}
+                  className={`px-2 py-1 text-xs font-semibold transition-colors ${outputMode === 'tests' ? 'bg-sand-800 text-white' : 'text-sand-500 hover:bg-sand-100'}`}
+                >
+                  Tests
+                </button>
+              </div>
               {result.ok && (
                 <div className="flex gap-1 px-3 py-1.5 ml-auto shrink-0">
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText(code).then(() => {
+                      const content = outputMode === 'code' ? code : testCode;
+                      navigator.clipboard.writeText(content).then(() => {
                         setCopied(true);
                         setTimeout(() => setCopied(false), 1800);
                       });
@@ -747,7 +654,7 @@ export function FOLEditor({ lang }: { lang: Language }) {
             <div className="overflow-auto" style={{ background: '#3a2611', minHeight: '420px' }}>
               {result.ok ? (
                 <pre className="text-xs font-mono p-5 leading-relaxed whitespace-pre-wrap break-words" style={{ color: '#faf0e6' }}>
-                  {code}
+                  {outputMode === 'code' ? code : testCode}
                 </pre>
               ) : (
                 <div className="flex items-center justify-center h-64 text-sand-500 text-xs">
